@@ -2,6 +2,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "../../../../server/db/prisma";
 import { updateTicketSchema } from "../../../../server/schemas/ticket-schema";
+import { canTransitionTicketStatus } from "../../../../server/services/ticket-status-transition";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -97,9 +98,25 @@ export async function PATCH(
       );
     }
 
+    const { status: newStatus, ...otherFields } = validation.data;
+
+    if (
+      newStatus !== undefined &&
+      newStatus !== existingTicket.status &&
+      !canTransitionTicketStatus(existingTicket.status, newStatus)
+    ) {
+      return NextResponse.json(
+        { error: "Transição de status não permitida." },
+        { status: 409 },
+      );
+    }
+
     const updatedTicket = await prisma.ticket.update({
       where: { id },
-      data: validation.data,
+      data: {
+        ...otherFields,
+        ...(newStatus !== undefined ? { status: newStatus } : {}),
+      },
     });
 
     return NextResponse.json(

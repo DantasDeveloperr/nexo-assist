@@ -165,6 +165,31 @@ describe("PATCH /api/tickets/[id]", () => {
     expect(response.status).toBe(400);
   });
 
+  
+  it.each([
+    ["OPEN", "CLOSED"],
+    ["WAITING_FOR_EMPLOYEE", "CLOSED"],
+    ["CLOSED", "IN_PROGRESS"],
+  ])(
+    "bloqueia a transição de %s para %s",
+    async (currentStatus, newStatus) => {
+      vi.mocked(prisma.ticket.findUnique).mockResolvedValue({
+        ...savedTicket,
+        status: currentStatus,
+      });
+
+      const response = await createPatchRequest("ticket-123", {
+        status: newStatus,
+      });
+      const body = await response.json();
+
+      expect(response.status).toBe(409);
+      expect(body.error).toBe("Transição de status não permitida.");
+      expect(prisma.ticket.update).not.toHaveBeenCalled();
+    },
+  );
+
+
   it("retorna 500 quando o banco falha ao atualizar", async () => {
     vi.mocked(prisma.ticket.update).mockRejectedValue(
       new Error("Falha simulada no banco"),
