@@ -2,6 +2,68 @@
 import { NextResponse } from "next/server";
 import { prisma } from "../../../server/db/prisma";
 import { createTicketSchema } from "../../../server/schemas/ticket-schema";
+import type { TicketStatus } from "../../../types/ticket";
+
+const validStatuses: TicketStatus[] = [
+  "OPEN",
+  "IN_PROGRESS",
+  "WAITING_FOR_EMPLOYEE",
+  "RESOLVED",
+  "CLOSED",
+];
+
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+
+  const employeeId = searchParams.get("affectedEmployeeId");
+  const status = searchParams.get("status");
+
+  if (employeeId !== null && employeeId.trim().length === 0) {
+    return NextResponse.json(
+      { error: "O identificador do funcionário não pode ser vazio." },
+      { status: 400 },
+    );
+  }
+
+  if (status !== null && !validStatuses.includes(status as TicketStatus)) {
+    return NextResponse.json(
+      {
+        error: "O status informado é inválido.",
+        validStatuses,
+      },
+      { status: 400 },
+    );
+  }
+
+  try {
+    const tickets = await prisma.ticket.findMany({
+      where: {
+        ...(employeeId !== null
+          ? { affectedEmployeeId: employeeId.trim() }
+          : {}),
+        ...(status !== null ? { status } : {}),
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
+
+    return NextResponse.json(
+      {
+        count: tickets.length,
+        data: tickets,
+      },
+      { status: 200 },
+    );
+  } catch (error) {
+    console.error("Erro ao consultar chamados:", error);
+
+    return NextResponse.json(
+      { error: "Não foi possível consultar os chamados." },
+      { status: 500 },
+    );
+  }
+}
 
 export async function POST(request: Request) {
   let body: unknown;
