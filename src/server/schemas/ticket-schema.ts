@@ -43,3 +43,32 @@ export const createTicketSchema = z.object({
 });
 
 export type CreateTicketInput = z.infer<typeof createTicketSchema>;
+
+export const updateTicketSchema = createTicketSchema
+  .omit({
+    affectedEmployeeId: true,
+  })
+  .extend({
+    status: z.enum(
+      [
+        "OPEN",
+        "IN_PROGRESS",
+        "WAITING_FOR_EMPLOYEE",
+        "RESOLVED",
+        "CLOSED",
+      ],
+      {
+        error: "O status informado é inválido.",
+      },
+    ).optional(),
+  })
+  .partial()
+  .strict()
+  .refine(
+    (data) => Object.keys(data).length > 0,
+    {
+      message: "Informe pelo menos um campo para atualizar.",
+    },
+  );
+
+export type UpdateTicketInput = z.infer<typeof updateTicketSchema>;
