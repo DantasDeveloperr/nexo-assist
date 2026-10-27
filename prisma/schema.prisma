@@ -1,0 +1,26 @@
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Ticket {
+  id                 String   @id @default(cuid())
+  title              String
+  description        String
+  type               String
+  category           String
+  priority           String
+  status             String   @default("OPEN")
+  affectedEmployeeId String
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([affectedEmployeeId])
+  @@index([status])
+  @@index([createdAt])
+}

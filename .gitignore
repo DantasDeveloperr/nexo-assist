@@ -40,3 +40,14 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+/src/generated/prisma
+# Bancos SQLite locais
+*.db
+*.db-journal
+
+# Ferramentas auxiliares geradas pelo Prisma
+/.agents/
+/.claude/
+/.windsurf/
+/skills-lock.json
