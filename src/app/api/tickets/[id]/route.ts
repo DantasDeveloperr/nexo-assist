@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "../../../../server/db/prisma";
 import { updateTicketSchema } from "../../../../server/schemas/ticket-schema";
 import { canTransitionTicketStatus } from "../../../../server/services/ticket-status-transition";
+import { canReopenResolvedTicket } from "../../../../server/services/ticket-reopening";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -100,22 +101,47 @@ export async function PATCH(
 
     const { status: newStatus, ...otherFields } = validation.data;
 
+    const isReopening =
+      existingTicket.status === "RESOLVED" &&
+      newStatus === "IN_PROGRESS";
+
+    const now = new Date();
+
     if (
       newStatus !== undefined &&
-      newStatus !== existingTicket.status &&
-      !canTransitionTicketStatus(existingTicket.status, newStatus)
+      newStatus !== existingTicket.status
     ) {
-      return NextResponse.json(
-        { error: "Transição de status não permitida." },
-        { status: 409 },
-      );
+      if (isReopening) {
+        if (!canReopenResolvedTicket(existingTicket.resolvedAt, now)) {
+          return NextResponse.json(
+            {
+              error:
+                "O prazo de sete dias para reabrir este chamado expirou.",
+            },
+            { status: 409 },
+          );
+        }
+      } else if (
+        !canTransitionTicketStatus(existingTicket.status, newStatus)
+      ) {
+        return NextResponse.json(
+          { error: "Transição de status não permitida." },
+          { status: 409 },
+        );
+      }
     }
+
+    const isResolving =
+      existingTicket.status !== "RESOLVED" &&
+      newStatus === "RESOLVED";
 
     const updatedTicket = await prisma.ticket.update({
       where: { id },
       data: {
         ...otherFields,
         ...(newStatus !== undefined ? { status: newStatus } : {}),
+        ...(isResolving ? { resolvedAt: now } : {}),
+        ...(isReopening ? { resolvedAt: null } : {}),
       },
     });
 

@@ -24,6 +24,7 @@ const savedTicket = {
   affectedEmployeeId: "EMP001",
   createdAt: new Date("2026-10-27T12:00:00.000Z"),
   updatedAt: new Date("2026-10-27T12:00:00.000Z"),
+  resolvedAt: null as Date | null,
 };
 
 function createRequest(id: string) {
@@ -82,9 +83,7 @@ describe("GET /api/tickets/[id]", () => {
     const body = await response.json();
 
     expect(response.status).toBe(500);
-    expect(body.error).toBe(
-      "Não foi possível consultar o chamado.",
-    );
+    expect(body.error).toBe("Não foi possível consultar o chamado.");
   });
 });
 
@@ -165,7 +164,6 @@ describe("PATCH /api/tickets/[id]", () => {
     expect(response.status).toBe(400);
   });
 
-  
   it.each([
     ["OPEN", "CLOSED"],
     ["WAITING_FOR_EMPLOYEE", "CLOSED"],
@@ -189,6 +187,108 @@ describe("PATCH /api/tickets/[id]", () => {
     },
   );
 
+  it("registra a data quando o chamado é resolvido", async () => {
+    vi.mocked(prisma.ticket.findUnique).mockResolvedValue({
+      ...savedTicket,
+      status: "IN_PROGRESS",
+    });
+
+    vi.mocked(prisma.ticket.update).mockImplementation((args) => {
+      const data = args.data;
+
+      return Promise.resolve({
+        ...savedTicket,
+        ...data,
+        status: data.status ?? "IN_PROGRESS",
+        resolvedAt:
+          data.resolvedAt instanceof Date
+            ? data.resolvedAt
+            : null,
+      }) as ReturnType<typeof prisma.ticket.update>;
+    });
+
+    const response = await createPatchRequest("ticket-123", {
+      status: "RESOLVED",
+    });
+
+    expect(response.status).toBe(200);
+
+    const updateCall = vi.mocked(prisma.ticket.update).mock.calls[0][0];
+
+    expect(updateCall.data.status).toBe("RESOLVED");
+    expect(updateCall.data.resolvedAt).toBeInstanceOf(Date);
+  });
+
+  it("permite reabrir dentro de sete dias e limpa resolvedAt", async () => {
+    const resolvedAt = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+
+    vi.mocked(prisma.ticket.findUnique).mockResolvedValue({
+      ...savedTicket,
+      status: "RESOLVED",
+      resolvedAt,
+    });
+
+    vi.mocked(prisma.ticket.update).mockResolvedValue({
+      ...savedTicket,
+      status: "IN_PROGRESS",
+      resolvedAt: null,
+    });
+
+    const response = await createPatchRequest("ticket-123", {
+      status: "IN_PROGRESS",
+    });
+
+    expect(response.status).toBe(200);
+    expect(prisma.ticket.update).toHaveBeenCalledWith({
+      where: { id: "ticket-123" },
+      data: {
+        status: "IN_PROGRESS",
+        resolvedAt: null,
+      },
+    });
+  });
+
+  it("bloqueia a reabertura após sete dias", async () => {
+    const resolvedAt = new Date(
+      Date.now() - 8 * 24 * 60 * 60 * 1000,
+    );
+
+    vi.mocked(prisma.ticket.findUnique).mockResolvedValue({
+      ...savedTicket,
+      status: "RESOLVED",
+      resolvedAt,
+    });
+
+    const response = await createPatchRequest("ticket-123", {
+      status: "IN_PROGRESS",
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(body.error).toBe(
+      "O prazo de sete dias para reabrir este chamado expirou.",
+    );
+    expect(prisma.ticket.update).not.toHaveBeenCalled();
+  });
+
+  it("bloqueia a reabertura quando não há data de resolução", async () => {
+    vi.mocked(prisma.ticket.findUnique).mockResolvedValue({
+      ...savedTicket,
+      status: "RESOLVED",
+      resolvedAt: null,
+    });
+
+    const response = await createPatchRequest("ticket-123", {
+      status: "IN_PROGRESS",
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(body.error).toBe(
+      "O prazo de sete dias para reabrir este chamado expirou.",
+    );
+    expect(prisma.ticket.update).not.toHaveBeenCalled();
+  });
 
   it("retorna 500 quando o banco falha ao atualizar", async () => {
     vi.mocked(prisma.ticket.update).mockRejectedValue(

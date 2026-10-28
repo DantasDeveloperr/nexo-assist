@@ -17,8 +17,9 @@ model Ticket {
   priority           String
   status             String   @default("OPEN")
   affectedEmployeeId String
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  resolvedAt         DateTime?
 
   @@index([affectedEmployeeId])
   @@index([status])
