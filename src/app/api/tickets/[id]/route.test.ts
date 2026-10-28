@@ -1,17 +1,27 @@
-
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../../../server/db/prisma", () => ({
   prisma: {
     ticket: {
-      findUnique: vi.fn(),
+      findFirst: vi.fn(),
       update: vi.fn(),
     },
   },
 }));
 
+vi.mock("../../../../server/auth/current-employee", () => ({
+  getAuthenticatedEmployee: vi.fn(),
+}));
+
 import { prisma } from "../../../../server/db/prisma";
+import { getAuthenticatedEmployee } from "../../../../server/auth/current-employee";
 import { GET, PATCH } from "./route";
+
+const authenticatedEmployee = {
+  id: "employee-123",
+  name: "Funcionário de Teste",
+  email: "funcionario@teste.com",
+};
 
 const savedTicket = {
   id: "ticket-123",
@@ -22,6 +32,7 @@ const savedTicket = {
   priority: "HIGH",
   status: "OPEN",
   affectedEmployeeId: "EMP001",
+  requestedByEmployeeId: authenticatedEmployee.id,
   createdAt: new Date("2026-10-27T12:00:00.000Z"),
   updatedAt: new Date("2026-10-27T12:00:00.000Z"),
   resolvedAt: null as Date | null,
@@ -48,10 +59,24 @@ function createPatchRequest(id: string, body: unknown) {
 describe("GET /api/tickets/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(getAuthenticatedEmployee).mockResolvedValue(
+      authenticatedEmployee,
+    );
   });
 
-  it("retorna 200 quando o chamado existe", async () => {
-    vi.mocked(prisma.ticket.findUnique).mockResolvedValue(savedTicket);
+  it("retorna 401 quando não há funcionário autenticado", async () => {
+    vi.mocked(getAuthenticatedEmployee).mockResolvedValue(null);
+
+    const response = await createRequest("ticket-123");
+    const body = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(body.error).toBe("Autenticação necessária.");
+    expect(prisma.ticket.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("retorna 200 quando o chamado pertence ao funcionário autenticado", async () => {
+    vi.mocked(prisma.ticket.findFirst).mockResolvedValue(savedTicket);
 
     const response = await createRequest("ticket-123");
     const body = await response.json();
@@ -59,13 +84,16 @@ describe("GET /api/tickets/[id]", () => {
     expect(response.status).toBe(200);
     expect(body.data.id).toBe("ticket-123");
     expect(body.data.title).toBe("VPN não conecta");
-    expect(prisma.ticket.findUnique).toHaveBeenCalledWith({
-      where: { id: "ticket-123" },
+    expect(prisma.ticket.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: "ticket-123",
+        requestedByEmployeeId: authenticatedEmployee.id,
+      },
     });
   });
 
-  it("retorna 404 quando o chamado não existe", async () => {
-    vi.mocked(prisma.ticket.findUnique).mockResolvedValue(null);
+  it("retorna 404 quando o chamado não existe ou não pertence ao funcionário", async () => {
+    vi.mocked(prisma.ticket.findFirst).mockResolvedValue(null);
 
     const response = await createRequest("inexistente");
     const body = await response.json();
@@ -75,7 +103,7 @@ describe("GET /api/tickets/[id]", () => {
   });
 
   it("retorna 500 quando o banco falha", async () => {
-    vi.mocked(prisma.ticket.findUnique).mockRejectedValue(
+    vi.mocked(prisma.ticket.findFirst).mockRejectedValue(
       new Error("Falha simulada no banco"),
     );
 
@@ -90,16 +118,31 @@ describe("GET /api/tickets/[id]", () => {
 describe("PATCH /api/tickets/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(prisma.ticket.findUnique).mockResolvedValue(savedTicket);
+    vi.mocked(getAuthenticatedEmployee).mockResolvedValue(
+      authenticatedEmployee,
+    );
+    vi.mocked(prisma.ticket.findFirst).mockResolvedValue(savedTicket);
+  });
+
+  it("retorna 401 quando não há funcionário autenticado", async () => {
+    vi.mocked(getAuthenticatedEmployee).mockResolvedValue(null);
+
+    const response = await createPatchRequest("ticket-123", {
+      status: "IN_PROGRESS",
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(body.error).toBe("Autenticação necessária.");
+    expect(prisma.ticket.findFirst).not.toHaveBeenCalled();
+    expect(prisma.ticket.update).not.toHaveBeenCalled();
   });
 
   it("atualiza o status e retorna 200", async () => {
-    const updatedTicket = {
+    vi.mocked(prisma.ticket.update).mockResolvedValue({
       ...savedTicket,
       status: "IN_PROGRESS",
-    };
-
-    vi.mocked(prisma.ticket.update).mockResolvedValue(updatedTicket);
+    });
 
     const response = await createPatchRequest("ticket-123", {
       status: "IN_PROGRESS",
@@ -108,14 +151,20 @@ describe("PATCH /api/tickets/[id]", () => {
 
     expect(response.status).toBe(200);
     expect(body.data.status).toBe("IN_PROGRESS");
+    expect(prisma.ticket.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: "ticket-123",
+        requestedByEmployeeId: authenticatedEmployee.id,
+      },
+    });
     expect(prisma.ticket.update).toHaveBeenCalledWith({
       where: { id: "ticket-123" },
       data: { status: "IN_PROGRESS" },
     });
   });
 
-  it("retorna 404 quando o chamado não existe", async () => {
-    vi.mocked(prisma.ticket.findUnique).mockResolvedValue(null);
+  it("retorna 404 quando o chamado não existe ou não pertence ao funcionário", async () => {
+    vi.mocked(prisma.ticket.findFirst).mockResolvedValue(null);
 
     const response = await createPatchRequest("inexistente", {
       status: "IN_PROGRESS",
@@ -171,7 +220,7 @@ describe("PATCH /api/tickets/[id]", () => {
   ])(
     "bloqueia a transição de %s para %s",
     async (currentStatus, newStatus) => {
-      vi.mocked(prisma.ticket.findUnique).mockResolvedValue({
+      vi.mocked(prisma.ticket.findFirst).mockResolvedValue({
         ...savedTicket,
         status: currentStatus,
       });
@@ -188,7 +237,7 @@ describe("PATCH /api/tickets/[id]", () => {
   );
 
   it("registra a data quando o chamado é resolvido", async () => {
-    vi.mocked(prisma.ticket.findUnique).mockResolvedValue({
+    vi.mocked(prisma.ticket.findFirst).mockResolvedValue({
       ...savedTicket,
       status: "IN_PROGRESS",
     });
@@ -220,9 +269,11 @@ describe("PATCH /api/tickets/[id]", () => {
   });
 
   it("permite reabrir dentro de sete dias e limpa resolvedAt", async () => {
-    const resolvedAt = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+    const resolvedAt = new Date(
+      Date.now() - 3 * 24 * 60 * 60 * 1000,
+    );
 
-    vi.mocked(prisma.ticket.findUnique).mockResolvedValue({
+    vi.mocked(prisma.ticket.findFirst).mockResolvedValue({
       ...savedTicket,
       status: "RESOLVED",
       resolvedAt,
@@ -253,7 +304,7 @@ describe("PATCH /api/tickets/[id]", () => {
       Date.now() - 8 * 24 * 60 * 60 * 1000,
     );
 
-    vi.mocked(prisma.ticket.findUnique).mockResolvedValue({
+    vi.mocked(prisma.ticket.findFirst).mockResolvedValue({
       ...savedTicket,
       status: "RESOLVED",
       resolvedAt,
@@ -272,7 +323,7 @@ describe("PATCH /api/tickets/[id]", () => {
   });
 
   it("bloqueia a reabertura quando não há data de resolução", async () => {
-    vi.mocked(prisma.ticket.findUnique).mockResolvedValue({
+    vi.mocked(prisma.ticket.findFirst).mockResolvedValue({
       ...savedTicket,
       status: "RESOLVED",
       resolvedAt: null,

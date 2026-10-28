@@ -8,20 +8,33 @@ datasource db {
   provider = "sqlite"
 }
 
+model Employee {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+
+  requestedTickets Ticket[] @relation("TicketRequester")
+}
+
 model Ticket {
-  id                 String   @id @default(cuid())
-  title              String
-  description        String
-  type               String
-  category           String
-  priority           String
-  status             String   @default("OPEN")
-  affectedEmployeeId String
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
-  resolvedAt         DateTime?
+  id                    String    @id @default(cuid())
+  title                 String
+  description           String
+  type                  String
+  category              String
+  priority              String
+  status                String    @default("OPEN")
+  affectedEmployeeId    String
+  requestedByEmployeeId String?
+  requestedBy           Employee? @relation("TicketRequester", fields: [requestedByEmployeeId], references: [id], onDelete: Restrict)
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  resolvedAt            DateTime?
 
   @@index([affectedEmployeeId])
+  @@index([requestedByEmployeeId])
   @@index([status])
   @@index([createdAt])
 }

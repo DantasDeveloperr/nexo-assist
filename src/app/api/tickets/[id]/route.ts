@@ -1,5 +1,6 @@
-
 import { NextResponse } from "next/server";
+
+import { getAuthenticatedEmployee } from "../../../../server/auth/current-employee";
 import { prisma } from "../../../../server/db/prisma";
 import { updateTicketSchema } from "../../../../server/schemas/ticket-schema";
 import { canTransitionTicketStatus } from "../../../../server/services/ticket-status-transition";
@@ -13,18 +14,30 @@ export async function GET(
   _request: Request,
   { params }: RouteContext,
 ) {
-  const { id } = await params;
-
-  if (!id.trim()) {
-    return NextResponse.json(
-      { error: "O identificador do chamado não pode ser vazio." },
-      { status: 400 },
-    );
-  }
-
   try {
-    const ticket = await prisma.ticket.findUnique({
-      where: { id },
+    const employee = await getAuthenticatedEmployee();
+
+    if (!employee) {
+      return NextResponse.json(
+        { error: "Autenticação necessária." },
+        { status: 401 },
+      );
+    }
+
+    const { id } = await params;
+
+    if (!id.trim()) {
+      return NextResponse.json(
+        { error: "O identificador do chamado não pode ser vazio." },
+        { status: 400 },
+      );
+    }
+
+    const ticket = await prisma.ticket.findFirst({
+      where: {
+        id,
+        requestedByEmployeeId: employee.id,
+      },
     });
 
     if (!ticket) {
@@ -34,10 +47,7 @@ export async function GET(
       );
     }
 
-    return NextResponse.json(
-      { data: ticket },
-      { status: 200 },
-    );
+    return NextResponse.json({ data: ticket }, { status: 200 });
   } catch (error) {
     console.error("Erro ao consultar chamado:", error);
 
@@ -52,44 +62,56 @@ export async function PATCH(
   request: Request,
   { params }: RouteContext,
 ) {
-  const { id } = await params;
-
-  if (!id.trim()) {
-    return NextResponse.json(
-      { error: "O identificador do chamado não pode ser vazio." },
-      { status: 400 },
-    );
-  }
-
-  let body: unknown;
-
   try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json(
-      { error: "O corpo da requisição deve conter um JSON válido." },
-      { status: 400 },
-    );
-  }
+    const employee = await getAuthenticatedEmployee();
 
-  const validation = updateTicketSchema.safeParse(body);
+    if (!employee) {
+      return NextResponse.json(
+        { error: "Autenticação necessária." },
+        { status: 401 },
+      );
+    }
 
-  if (!validation.success) {
-    return NextResponse.json(
-      {
-        error: "Os dados enviados são inválidos.",
-        details: validation.error.issues.map((issue) => ({
-          field: issue.path.join("."),
-          message: issue.message,
-        })),
+    const { id } = await params;
+
+    if (!id.trim()) {
+      return NextResponse.json(
+        { error: "O identificador do chamado não pode ser vazio." },
+        { status: 400 },
+      );
+    }
+
+    let body: unknown;
+
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json(
+        { error: "O corpo da requisição deve conter um JSON válido." },
+        { status: 400 },
+      );
+    }
+
+    const validation = updateTicketSchema.safeParse(body);
+
+    if (!validation.success) {
+      return NextResponse.json(
+        {
+          error: "Os dados enviados são inválidos.",
+          details: validation.error.issues.map((issue) => ({
+            field: issue.path.join("."),
+            message: issue.message,
+          })),
+        },
+        { status: 400 },
+      );
+    }
+
+    const existingTicket = await prisma.ticket.findFirst({
+      where: {
+        id,
+        requestedByEmployeeId: employee.id,
       },
-      { status: 400 },
-    );
-  }
-
-  try {
-    const existingTicket = await prisma.ticket.findUnique({
-      where: { id },
     });
 
     if (!existingTicket) {

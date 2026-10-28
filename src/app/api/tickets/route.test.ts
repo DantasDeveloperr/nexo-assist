@@ -1,4 +1,3 @@
-
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../../server/db/prisma", () => ({
@@ -10,8 +9,19 @@ vi.mock("../../../server/db/prisma", () => ({
   },
 }));
 
+vi.mock("../../../server/auth/current-employee", () => ({
+  getAuthenticatedEmployee: vi.fn(),
+}));
+
+import { getAuthenticatedEmployee } from "../../../server/auth/current-employee";
 import { prisma } from "../../../server/db/prisma";
 import { GET, POST } from "./route";
+
+const authenticatedEmployee = {
+  id: "employee-123",
+  name: "Funcionário de Teste",
+  email: "funcionario@teste.com",
+};
 
 const validTicket = {
   title: "VPN não funciona",
@@ -25,6 +35,7 @@ const validTicket = {
 const savedTicket = {
   id: "ticket-test-001",
   ...validTicket,
+  requestedByEmployeeId: authenticatedEmployee.id,
   status: "OPEN",
   createdAt: new Date("2026-10-27T12:00:00.000Z"),
   updatedAt: new Date("2026-10-27T12:00:00.000Z"),
@@ -41,9 +52,7 @@ function createPostRequest(body: string): Request {
 }
 
 function createGetRequest(query = ""): Request {
-  const url = `http://localhost/api/tickets${query}`;
-
-  return new Request(url, {
+  return new Request(`http://localhost/api/tickets${query}`, {
     method: "GET",
   });
 }
@@ -51,9 +60,12 @@ function createGetRequest(query = ""): Request {
 describe("GET /api/tickets", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(getAuthenticatedEmployee).mockResolvedValue(
+      authenticatedEmployee,
+    );
   });
 
-  it("retorna 200 e a lista de chamados", async () => {
+  it("retorna 200 e a lista de chamados do funcionário autenticado", async () => {
     vi.mocked(prisma.ticket.findMany).mockResolvedValue([
       savedTicket,
     ] as never);
@@ -65,7 +77,9 @@ describe("GET /api/tickets", () => {
     expect(body.count).toBe(1);
     expect(body.data[0].id).toBe("ticket-test-001");
     expect(prisma.ticket.findMany).toHaveBeenCalledWith({
-      where: {},
+      where: {
+        requestedByEmployeeId: authenticatedEmployee.id,
+      },
       orderBy: {
         createdAt: "desc",
       },
@@ -83,7 +97,7 @@ describe("GET /api/tickets", () => {
     expect(body.data).toEqual([]);
   });
 
-  it("filtra os chamados pelo funcionário", async () => {
+  it("filtra os chamados pelo funcionário afetado sem remover o filtro de proprietário", async () => {
     vi.mocked(prisma.ticket.findMany).mockResolvedValue([
       savedTicket,
     ] as never);
@@ -95,6 +109,7 @@ describe("GET /api/tickets", () => {
     expect(response.status).toBe(200);
     expect(prisma.ticket.findMany).toHaveBeenCalledWith({
       where: {
+        requestedByEmployeeId: authenticatedEmployee.id,
         affectedEmployeeId: "EMP001",
       },
       orderBy: {
@@ -113,6 +128,7 @@ describe("GET /api/tickets", () => {
     expect(response.status).toBe(200);
     expect(prisma.ticket.findMany).toHaveBeenCalledWith({
       where: {
+        requestedByEmployeeId: authenticatedEmployee.id,
         status: "OPEN",
       },
       orderBy: {
@@ -121,20 +137,19 @@ describe("GET /api/tickets", () => {
     });
   });
 
-  it("combina o filtro de funcionário com o status", async () => {
+  it("combina os filtros de funcionário afetado e status", async () => {
     vi.mocked(prisma.ticket.findMany).mockResolvedValue([
       savedTicket,
     ] as never);
 
     const response = await GET(
-      createGetRequest(
-        "?affectedEmployeeId=EMP001&status=OPEN",
-      ),
+      createGetRequest("?affectedEmployeeId=EMP001&status=OPEN"),
     );
 
     expect(response.status).toBe(200);
     expect(prisma.ticket.findMany).toHaveBeenCalledWith({
       where: {
+        requestedByEmployeeId: authenticatedEmployee.id,
         affectedEmployeeId: "EMP001",
         status: "OPEN",
       },
@@ -145,9 +160,7 @@ describe("GET /api/tickets", () => {
   });
 
   it("retorna 400 quando o status é inválido", async () => {
-    const response = await GET(
-      createGetRequest("?status=INVALID"),
-    );
+    const response = await GET(createGetRequest("?status=INVALID"));
     const body = await response.json();
 
     expect(response.status).toBe(400);
@@ -165,6 +178,17 @@ describe("GET /api/tickets", () => {
     expect(body.error).toBe(
       "O identificador do funcionário não pode ser vazio.",
     );
+    expect(prisma.ticket.findMany).not.toHaveBeenCalled();
+  });
+
+  it("retorna 401 quando não existe funcionário autenticado", async () => {
+    vi.mocked(getAuthenticatedEmployee).mockResolvedValue(null);
+
+    const response = await GET(createGetRequest());
+    const body = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(body.error).toBe("Autenticação necessária.");
     expect(prisma.ticket.findMany).not.toHaveBeenCalled();
   });
 
@@ -186,9 +210,12 @@ describe("GET /api/tickets", () => {
 describe("POST /api/tickets", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(getAuthenticatedEmployee).mockResolvedValue(
+      authenticatedEmployee,
+    );
   });
 
-  it("retorna 201 quando o chamado é criado", async () => {
+  it("retorna 201 quando o chamado é criado e associa o solicitante autenticado", async () => {
     vi.mocked(prisma.ticket.create).mockResolvedValue(
       savedTicket as never,
     );
@@ -202,8 +229,24 @@ describe("POST /api/tickets", () => {
     expect(body.message).toBe("Chamado criado com sucesso.");
     expect(body.data.id).toBe("ticket-test-001");
     expect(prisma.ticket.create).toHaveBeenCalledWith({
-      data: validTicket,
+      data: {
+        ...validTicket,
+        requestedByEmployeeId: authenticatedEmployee.id,
+      },
     });
+  });
+
+  it("retorna 401 quando não existe funcionário autenticado", async () => {
+    vi.mocked(getAuthenticatedEmployee).mockResolvedValue(null);
+
+    const response = await POST(
+      createPostRequest(JSON.stringify(validTicket)),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(body.error).toBe("Autenticação necessária.");
+    expect(prisma.ticket.create).not.toHaveBeenCalled();
   });
 
   it("retorna 400 quando o JSON é inválido", async () => {
