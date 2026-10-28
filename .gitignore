@@ -51,3 +51,7 @@ next-env.d.ts
 /.claude/
 /.windsurf/
 /skills-lock.json
+
+# Scripts locais de teste da integração com IA
+/scripts/test-gemini.ts
+/scripts/test-ticket-ai.ts
