@@ -114,6 +114,10 @@ export default function Home() {
   const [type, setType] = useState("INC");
   const [category, setCategory] = useState("SOFTWARE");
   const [priority, setPriority] = useState("MEDIUM");
+  
+  const [isInterpreting, setIsInterpreting] = useState(false);
+  const [aiError, setAiError] = useState("");
+  const [aiMessage, setAiMessage] = useState("");
 
   async function loadTickets(status = statusFilter) {
     setIsLoadingTickets(true);
@@ -329,6 +333,73 @@ export default function Home() {
       setIsCreatingTicket(false);
     }
   }
+  
+    async function handleInterpretTicket() {
+    if (!description.trim()) {
+      setAiError("Descreva o problema antes de solicitar a sugestão da IA.");
+      setAiMessage("");
+      return;
+    }
+
+    setIsInterpreting(true);
+    setAiError("");
+    setAiMessage("");
+
+    try {
+      const response = await fetch("/api/tickets/interpret", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: description }),
+      });
+
+      const result = await response.json();
+
+      if (response.status === 401) {
+        setEmployee(null);
+        setAiError("Sua sessão expirou. Entre novamente.");
+        return;
+      }
+
+      if (!response.ok) {
+        setAiError(
+          result.message ?? "Não foi possível interpretar o relato.",
+        );
+        return;
+      }
+
+      const interpretation = result.data as {
+        title: string;
+        type: "INC" | "REQ" | null;
+        category:
+          | "ACCESS"
+          | "NETWORK_VPN"
+          | "HARDWARE"
+          | "SOFTWARE"
+          | "EMAIL"
+          | "OTHER";
+        needsClarification: boolean;
+        clarifyingQuestion: string;
+      };
+
+      setTitle(interpretation.title);
+
+      if (interpretation.type !== null) {
+        setType(interpretation.type);
+      }
+
+      setCategory(interpretation.category);
+
+      setAiMessage(
+        interpretation.needsClarification
+          ? `Sugestão aplicada. Para melhorar a classificação: ${interpretation.clarifyingQuestion}`
+          : "Sugestão da IA aplicada. Revise os campos antes de abrir o chamado.",
+      );
+    } catch {
+      setAiError("Não foi possível conectar ao serviço de IA. Tente novamente.");
+    } finally {
+      setIsInterpreting(false);
+    }
+  }
 
   const openCount = tickets.filter((ticket) => ticket.status === "OPEN").length;
   const inProgressCount = tickets.filter(
@@ -470,9 +541,40 @@ export default function Home() {
                     placeholder="Explique o que aconteceu, quando começou e qual mensagem aparece."
                     className="w-full resize-y rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 disabled:bg-slate-50"
                   />
+                  
                   <p className="mt-1 text-right text-xs text-slate-400">
-                    {description.length}/2000
-                  </p>
+  {description.length}/2000
+</p>
+
+<div className="mt-3">
+  <button
+    type="button"
+    onClick={handleInterpretTicket}
+    disabled={
+      !description.trim() ||
+      isInterpreting ||
+      isCreatingTicket
+    }
+    className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-medium text-blue-700 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
+  >
+    {isInterpreting
+      ? "Interpretando relato..."
+      : "Sugerir preenchimento com IA"}
+  </button>
+
+  {aiError && (
+    <p className="mt-2 text-sm text-red-600" role="alert">
+      {aiError}
+    </p>
+  )}
+
+  {aiMessage && (
+    <p className="mt-2 text-sm text-blue-700" role="status">
+      {aiMessage}
+    </p>
+  )}
+</div>
+
                 </div>
 
                 <div className="grid gap-5 sm:grid-cols-3">
