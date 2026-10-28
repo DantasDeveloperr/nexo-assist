@@ -11,6 +11,7 @@
     "create:initial-employee": "tsx scripts/create-initial-employee.ts"
   },
   "dependencies": {
+    "@google/genai": "^2.31.0",
     "@prisma/adapter-better-sqlite3": "^7.10.1",
     "@prisma/client": "^7.10.1",
     "bcryptjs": "^3.0.3",
