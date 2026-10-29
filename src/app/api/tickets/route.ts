@@ -1,8 +1,10 @@
+
 import { NextResponse } from "next/server";
 
 import { getAuthenticatedEmployee } from "../../../server/auth/current-employee";
 import { prisma } from "../../../server/db/prisma";
 import { createTicketSchema } from "../../../server/schemas/ticket-schema";
+import { findDuplicateTicket } from "../../../server/services/ticket-duplicate";
 import type { TicketStatus } from "../../../types/ticket";
 
 const VALID_STATUSES: TicketStatus[] = [
@@ -12,6 +14,12 @@ const VALID_STATUSES: TicketStatus[] = [
   "RESOLVED",
   "CLOSED",
 ];
+
+const ACTIVE_STATUSES = [
+  "OPEN",
+  "IN_PROGRESS",
+  "WAITING_FOR_EMPLOYEE",
+] as const;
 
 export async function GET(request: Request) {
   try {
@@ -116,6 +124,38 @@ export async function POST(request: Request) {
       );
     }
 
+    // 1. Busca chamados ativos do solicitante autenticado
+    // que tenham o mesmo funcionário afetado, tipo e categoria.
+    const existingTickets = await prisma.ticket.findMany({
+      where: {
+        requestedByEmployeeId: employee.id,
+        affectedEmployeeId: validation.data.affectedEmployeeId,
+        type: validation.data.type,
+        category: validation.data.category,
+        status: {
+          in: [...ACTIVE_STATUSES],
+        },
+      },
+    });
+
+    // 2. Compara os títulos para identificar uma duplicidade.
+    const duplicateTicket = findDuplicateTicket(
+      validation.data,
+      existingTickets,
+    );
+
+    // 3. Se encontrar duplicidade, não cria outro chamado.
+    if (duplicateTicket) {
+      return NextResponse.json(
+        {
+          message: "Já existe um chamado ativo para este problema.",
+          data: duplicateTicket,
+        },
+        { status: 409 },
+      );
+    }
+
+    // 4. Se não encontrar duplicidade, cria normalmente.
     const ticket = await prisma.ticket.create({
       data: {
         ...validation.data,

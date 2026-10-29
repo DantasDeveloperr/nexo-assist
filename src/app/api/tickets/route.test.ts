@@ -1,3 +1,4 @@
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../../server/db/prisma", () => ({
@@ -137,7 +138,6 @@ describe("GET /api/tickets", () => {
     });
   });
 
-  
   it("aceita WAITING_FOR_EMPLOYEE como filtro de status", async () => {
     vi.mocked(prisma.ticket.findMany).mockResolvedValue([
       { ...savedTicket, status: "WAITING_FOR_EMPLOYEE" },
@@ -160,7 +160,6 @@ describe("GET /api/tickets", () => {
       },
     });
   });
-
 
   it("combina os filtros de funcionário afetado e status", async () => {
     vi.mocked(prisma.ticket.findMany).mockResolvedValue([
@@ -238,6 +237,7 @@ describe("POST /api/tickets", () => {
     vi.mocked(getAuthenticatedEmployee).mockResolvedValue(
       authenticatedEmployee,
     );
+    vi.mocked(prisma.ticket.findMany).mockResolvedValue([]);
   });
 
   it("retorna 201 quando o chamado é criado e associa o solicitante autenticado", async () => {
@@ -261,6 +261,45 @@ describe("POST /api/tickets", () => {
     });
   });
 
+  it("retorna 409 quando encontra um chamado duplicado", async () => {
+    vi.mocked(prisma.ticket.findMany).mockResolvedValue([
+      savedTicket,
+    ] as never);
+
+    const response = await POST(
+      createPostRequest(JSON.stringify(validTicket)),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(body.message).toBe(
+      "Já existe um chamado ativo para este problema.",
+    );
+    expect(body.data.id).toBe(savedTicket.id);
+    expect(prisma.ticket.create).not.toHaveBeenCalled();
+  });
+
+  it("consulta duplicidade considerando apenas chamados do solicitante autenticado", async () => {
+    vi.mocked(prisma.ticket.findMany).mockResolvedValue([]);
+    vi.mocked(prisma.ticket.create).mockResolvedValue(
+      savedTicket as never,
+    );
+
+    await POST(createPostRequest(JSON.stringify(validTicket)));
+
+    expect(prisma.ticket.findMany).toHaveBeenCalledWith({
+      where: {
+        requestedByEmployeeId: authenticatedEmployee.id,
+        affectedEmployeeId: validTicket.affectedEmployeeId,
+        type: validTicket.type,
+        category: validTicket.category,
+        status: {
+          in: ["OPEN", "IN_PROGRESS", "WAITING_FOR_EMPLOYEE"],
+        },
+      },
+    });
+  });
+
   it("retorna 401 quando não existe funcionário autenticado", async () => {
     vi.mocked(getAuthenticatedEmployee).mockResolvedValue(null);
 
@@ -272,6 +311,7 @@ describe("POST /api/tickets", () => {
     expect(response.status).toBe(401);
     expect(body.error).toBe("Autenticação necessária.");
     expect(prisma.ticket.create).not.toHaveBeenCalled();
+    expect(prisma.ticket.findMany).not.toHaveBeenCalled();
   });
 
   it("retorna 400 quando o JSON é inválido", async () => {
@@ -285,6 +325,7 @@ describe("POST /api/tickets", () => {
       "O corpo da requisição deve conter um JSON válido.",
     );
     expect(prisma.ticket.create).not.toHaveBeenCalled();
+    expect(prisma.ticket.findMany).not.toHaveBeenCalled();
   });
 
   it("retorna 400 quando o título está vazio", async () => {
@@ -306,6 +347,7 @@ describe("POST /api/tickets", () => {
       ]),
     );
     expect(prisma.ticket.create).not.toHaveBeenCalled();
+    expect(prisma.ticket.findMany).not.toHaveBeenCalled();
   });
 
   it("retorna 400 quando o tipo é inválido", async () => {
@@ -323,6 +365,7 @@ describe("POST /api/tickets", () => {
       ]),
     );
     expect(prisma.ticket.create).not.toHaveBeenCalled();
+    expect(prisma.ticket.findMany).not.toHaveBeenCalled();
   });
 
   it("retorna 400 quando faltam campos obrigatórios", async () => {
@@ -337,6 +380,7 @@ describe("POST /api/tickets", () => {
     expect(body.error).toBe("Os dados do chamado são inválidos.");
     expect(body.details.length).toBeGreaterThan(0);
     expect(prisma.ticket.create).not.toHaveBeenCalled();
+    expect(prisma.ticket.findMany).not.toHaveBeenCalled();
   });
 
   it("retorna 500 quando o banco falha ao salvar", async () => {
