@@ -137,6 +137,31 @@ describe("GET /api/tickets", () => {
     });
   });
 
+  
+  it("aceita WAITING_FOR_EMPLOYEE como filtro de status", async () => {
+    vi.mocked(prisma.ticket.findMany).mockResolvedValue([
+      { ...savedTicket, status: "WAITING_FOR_EMPLOYEE" },
+    ] as never);
+
+    const response = await GET(
+      createGetRequest("?status=WAITING_FOR_EMPLOYEE"),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data[0].status).toBe("WAITING_FOR_EMPLOYEE");
+    expect(prisma.ticket.findMany).toHaveBeenCalledWith({
+      where: {
+        requestedByEmployeeId: authenticatedEmployee.id,
+        status: "WAITING_FOR_EMPLOYEE",
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
+  });
+
+
   it("combina os filtros de funcionário afetado e status", async () => {
     vi.mocked(prisma.ticket.findMany).mockResolvedValue([
       savedTicket,

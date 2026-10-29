@@ -8,6 +8,7 @@ import type { TicketStatus } from "../../../types/ticket";
 const VALID_STATUSES: TicketStatus[] = [
   "OPEN",
   "IN_PROGRESS",
+  "WAITING_FOR_EMPLOYEE",
   "RESOLVED",
   "CLOSED",
 ];
