@@ -1,3 +1,4 @@
+
 import { NextResponse } from "next/server";
 
 import { getAuthenticatedEmployee } from "../../../../server/auth/current-employee";
@@ -9,6 +10,12 @@ import { canReopenResolvedTicket } from "../../../../server/services/ticket-reop
 interface RouteContext {
   params: Promise<{ id: string }>;
 }
+
+const editableTicketStatuses = [
+  "OPEN",
+  "IN_PROGRESS",
+  "WAITING_FOR_EMPLOYEE",
+] as const;
 
 export async function GET(
   _request: Request,
@@ -123,27 +130,45 @@ export async function PATCH(
 
     const { status: newStatus, ...otherFields } = validation.data;
 
-    const isReopening =
-      existingTicket.status === "RESOLVED" &&
-      newStatus === "IN_PROGRESS";
+    const hasTextChanges =
+      otherFields.title !== undefined ||
+      otherFields.description !== undefined;
 
-    const now = new Date();
+    // Chamados encerrados não podem receber alterações.
+    if (existingTicket.status === "CLOSED") {
+      return NextResponse.json(
+        { error: "Chamados encerrados não podem ser alterados." },
+        { status: 409 },
+      );
+    }
 
-    if (
-      newStatus !== undefined &&
-      newStatus !== existingTicket.status
-    ) {
-      if (isReopening) {
-        if (!canReopenResolvedTicket(existingTicket.resolvedAt, now)) {
-          return NextResponse.json(
-            {
-              error:
-                "O prazo de sete dias para reabrir este chamado expirou.",
-            },
-            { status: 409 },
-          );
-        }
-      } else if (
+    // Chamados resolvidos só podem ser reabertos.
+    if (existingTicket.status === "RESOLVED") {
+      const isReopening = newStatus === "IN_PROGRESS";
+
+      if (!isReopening || hasTextChanges) {
+        return NextResponse.json(
+          {
+            error:
+              "Chamados resolvidos só podem ser reabertos dentro do prazo permitido.",
+          },
+          { status: 409 },
+        );
+      }
+
+      const now = new Date();
+
+      if (!canReopenResolvedTicket(existingTicket.resolvedAt, now)) {
+        return NextResponse.json(
+          {
+            error:
+              "O prazo de sete dias para reabrir este chamado expirou.",
+          },
+          { status: 409 },
+        );
+      }
+
+      if (
         !canTransitionTicketStatus(existingTicket.status, newStatus)
       ) {
         return NextResponse.json(
@@ -151,6 +176,44 @@ export async function PATCH(
           { status: 409 },
         );
       }
+
+      const updatedTicket = await prisma.ticket.update({
+        where: { id },
+        data: {
+          status: "IN_PROGRESS",
+          resolvedAt: null,
+        },
+      });
+
+      return NextResponse.json(
+        { data: updatedTicket },
+        { status: 200 },
+      );
+    }
+
+    // Apenas chamados ativos podem ter título e descrição editados.
+    if (
+      !editableTicketStatuses.includes(
+        existingTicket.status as (typeof editableTicketStatuses)[number],
+      )
+    ) {
+      return NextResponse.json(
+        { error: "O chamado não permite alterações neste estado." },
+        { status: 409 },
+      );
+    }
+
+    const now = new Date();
+
+    if (
+      newStatus !== undefined &&
+      newStatus !== existingTicket.status &&
+      !canTransitionTicketStatus(existingTicket.status, newStatus)
+    ) {
+      return NextResponse.json(
+        { error: "Transição de status não permitida." },
+        { status: 409 },
+      );
     }
 
     const isResolving =
@@ -163,7 +226,6 @@ export async function PATCH(
         ...otherFields,
         ...(newStatus !== undefined ? { status: newStatus } : {}),
         ...(isResolving ? { resolvedAt: now } : {}),
-        ...(isReopening ? { resolvedAt: null } : {}),
       },
     });
 

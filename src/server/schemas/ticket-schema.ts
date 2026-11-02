@@ -44,31 +44,40 @@ export const createTicketSchema = z.object({
 
 export type CreateTicketInput = z.infer<typeof createTicketSchema>;
 
-export const updateTicketSchema = createTicketSchema
-  .omit({
-    affectedEmployeeId: true,
+export const updateTicketSchema = z
+  .object({
+    title: z
+      .string()
+      .trim()
+      .min(1, "O título é obrigatório.")
+      .max(120, "O título deve ter no máximo 120 caracteres.")
+      .optional(),
+
+    description: z
+      .string()
+      .trim()
+      .min(1, "A descrição é obrigatória.")
+      .max(2000, "A descrição deve ter no máximo 2000 caracteres.")
+      .optional(),
+
+    status: z
+      .enum(
+        [
+          "OPEN",
+          "IN_PROGRESS",
+          "WAITING_FOR_EMPLOYEE",
+          "RESOLVED",
+          "CLOSED",
+        ],
+        {
+          error: "O status informado é inválido.",
+        },
+      )
+      .optional(),
   })
-  .extend({
-    status: z.enum(
-      [
-        "OPEN",
-        "IN_PROGRESS",
-        "WAITING_FOR_EMPLOYEE",
-        "RESOLVED",
-        "CLOSED",
-      ],
-      {
-        error: "O status informado é inválido.",
-      },
-    ).optional(),
-  })
-  .partial()
   .strict()
-  .refine(
-    (data) => Object.keys(data).length > 0,
-    {
-      message: "Informe pelo menos um campo para atualizar.",
-    },
-  );
+  .refine((data) => Object.keys(data).length > 0, {
+    message: "Informe pelo menos um campo para atualizar.",
+  });
 
 export type UpdateTicketInput = z.infer<typeof updateTicketSchema>;

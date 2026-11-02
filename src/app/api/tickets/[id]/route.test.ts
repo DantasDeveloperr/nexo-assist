@@ -1,3 +1,4 @@
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../../../server/db/prisma", () => ({
@@ -118,9 +119,11 @@ describe("GET /api/tickets/[id]", () => {
 describe("PATCH /api/tickets/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+
     vi.mocked(getAuthenticatedEmployee).mockResolvedValue(
       authenticatedEmployee,
     );
+
     vi.mocked(prisma.ticket.findFirst).mockResolvedValue(savedTicket);
   });
 
@@ -162,6 +165,66 @@ describe("PATCH /api/tickets/[id]", () => {
       data: { status: "IN_PROGRESS" },
     });
   });
+
+  it("permite editar o título de um chamado ativo", async () => {
+    vi.mocked(prisma.ticket.update).mockResolvedValue({
+      ...savedTicket,
+      title: "Novo título",
+    });
+
+    const response = await createPatchRequest("ticket-123", {
+      title: "Novo título",
+    });
+
+    expect(response.status).toBe(200);
+    expect(prisma.ticket.update).toHaveBeenCalledWith({
+      where: { id: "ticket-123" },
+      data: { title: "Novo título" },
+    });
+  });
+
+  it("permite editar a descrição de um chamado ativo", async () => {
+    vi.mocked(prisma.ticket.update).mockResolvedValue({
+      ...savedTicket,
+      description: "Nova descrição",
+    });
+
+    const response = await createPatchRequest("ticket-123", {
+      description: "Nova descrição",
+    });
+
+    expect(response.status).toBe(200);
+    expect(prisma.ticket.update).toHaveBeenCalledWith({
+      where: { id: "ticket-123" },
+      data: { description: "Nova descrição" },
+    });
+  });
+
+  it.each(["OPEN", "IN_PROGRESS", "WAITING_FOR_EMPLOYEE"])(
+    "permite editar o título quando o chamado está em %s",
+    async (currentStatus) => {
+      vi.mocked(prisma.ticket.findFirst).mockResolvedValue({
+        ...savedTicket,
+        status: currentStatus,
+      });
+
+      vi.mocked(prisma.ticket.update).mockResolvedValue({
+        ...savedTicket,
+        status: currentStatus,
+        title: "Título atualizado",
+      });
+
+      const response = await createPatchRequest("ticket-123", {
+        title: "Título atualizado",
+      });
+
+      expect(response.status).toBe(200);
+      expect(prisma.ticket.update).toHaveBeenCalledWith({
+        where: { id: "ticket-123" },
+        data: { title: "Título atualizado" },
+      });
+    },
+  );
 
   it("retorna 404 quando o chamado não existe ou não pertence ao funcionário", async () => {
     vi.mocked(prisma.ticket.findFirst).mockResolvedValue(null);
@@ -216,7 +279,6 @@ describe("PATCH /api/tickets/[id]", () => {
   it.each([
     ["OPEN", "CLOSED"],
     ["WAITING_FOR_EMPLOYEE", "CLOSED"],
-    ["CLOSED", "IN_PROGRESS"],
   ])(
     "bloqueia a transição de %s para %s",
     async (currentStatus, newStatus) => {
@@ -235,6 +297,107 @@ describe("PATCH /api/tickets/[id]", () => {
       expect(prisma.ticket.update).not.toHaveBeenCalled();
     },
   );
+
+  it("bloqueia qualquer alteração em um chamado encerrado", async () => {
+    vi.mocked(prisma.ticket.findFirst).mockResolvedValue({
+      ...savedTicket,
+      status: "CLOSED",
+    });
+
+    const response = await createPatchRequest("ticket-123", {
+      title: "Tentativa de alteração",
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(body.error).toBe(
+      "Chamados encerrados não podem ser alterados.",
+    );
+    expect(prisma.ticket.update).not.toHaveBeenCalled();
+  });
+
+  it("bloqueia a transição de CLOSED para IN_PROGRESS", async () => {
+    vi.mocked(prisma.ticket.findFirst).mockResolvedValue({
+      ...savedTicket,
+      status: "CLOSED",
+    });
+
+    const response = await createPatchRequest("ticket-123", {
+      status: "IN_PROGRESS",
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(body.error).toBe(
+      "Chamados encerrados não podem ser alterados.",
+    );
+    expect(prisma.ticket.update).not.toHaveBeenCalled();
+  });
+
+  it("bloqueia a edição do título de um chamado resolvido", async () => {
+    vi.mocked(prisma.ticket.findFirst).mockResolvedValue({
+      ...savedTicket,
+      status: "RESOLVED",
+      resolvedAt: new Date(),
+    });
+
+    const response = await createPatchRequest("ticket-123", {
+      title: "Novo título",
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(body.error).toBe(
+      "Chamados resolvidos só podem ser reabertos dentro do prazo permitido.",
+    );
+    expect(prisma.ticket.update).not.toHaveBeenCalled();
+  });
+
+  it("bloqueia a edição da descrição de um chamado resolvido", async () => {
+    vi.mocked(prisma.ticket.findFirst).mockResolvedValue({
+      ...savedTicket,
+      status: "RESOLVED",
+      resolvedAt: new Date(),
+    });
+
+    const response = await createPatchRequest("ticket-123", {
+      description: "Nova descrição",
+    });
+
+    expect(response.status).toBe(409);
+    expect(prisma.ticket.update).not.toHaveBeenCalled();
+  });
+
+  it("bloqueia a reabertura acompanhada de alteração de título", async () => {
+    vi.mocked(prisma.ticket.findFirst).mockResolvedValue({
+      ...savedTicket,
+      status: "RESOLVED",
+      resolvedAt: new Date(),
+    });
+
+    const response = await createPatchRequest("ticket-123", {
+      status: "IN_PROGRESS",
+      title: "Novo título",
+    });
+
+    expect(response.status).toBe(409);
+    expect(prisma.ticket.update).not.toHaveBeenCalled();
+  });
+
+  it("bloqueia a tentativa de encerrar um chamado resolvido pelo funcionário", async () => {
+    vi.mocked(prisma.ticket.findFirst).mockResolvedValue({
+      ...savedTicket,
+      status: "RESOLVED",
+      resolvedAt: new Date(),
+    });
+
+    const response = await createPatchRequest("ticket-123", {
+      status: "CLOSED",
+    });
+
+    expect(response.status).toBe(409);
+    expect(prisma.ticket.update).not.toHaveBeenCalled();
+  });
 
   it("registra a data quando o chamado é resolvido", async () => {
     vi.mocked(prisma.ticket.findFirst).mockResolvedValue({
@@ -352,6 +515,8 @@ describe("PATCH /api/tickets/[id]", () => {
     const body = await response.json();
 
     expect(response.status).toBe(500);
-    expect(body.error).toBe("Não foi possível atualizar o chamado.");
+    expect(body.error).toBe(
+      "Não foi possível atualizar o chamado.",
+    );
   });
 });

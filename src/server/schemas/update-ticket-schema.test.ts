@@ -11,6 +11,14 @@ describe("updateTicketSchema", () => {
     expect(result.success).toBe(true);
   });
 
+  it("aceita atualizar apenas a descrição", () => {
+    const result = updateTicketSchema.safeParse({
+      description: "Erro 809 ao conectar.",
+    });
+
+    expect(result.success).toBe(true);
+  });
+
   it("aceita atualizar apenas o status", () => {
     const result = updateTicketSchema.safeParse({
       status: "IN_PROGRESS",
@@ -19,12 +27,11 @@ describe("updateTicketSchema", () => {
     expect(result.success).toBe(true);
   });
 
-  it("aceita atualizar vários campos válidos", () => {
+  it("aceita atualizar vários campos permitidos", () => {
     const result = updateTicketSchema.safeParse({
       title: "VPN não conecta",
       description: "Erro 809 ao conectar.",
-      priority: "HIGH",
-      status: "OPEN",
+      status: "IN_PROGRESS",
     });
 
     expect(result.success).toBe(true);
@@ -60,9 +67,25 @@ describe("updateTicketSchema", () => {
     expect(result.success).toBe(false);
   });
 
-  it("rejeita uma prioridade inválida", () => {
+  it("rejeita alteração de prioridade", () => {
     const result = updateTicketSchema.safeParse({
-      priority: "URGENT",
+      priority: "HIGH",
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it("rejeita alteração de categoria", () => {
+    const result = updateTicketSchema.safeParse({
+      category: "HARDWARE",
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it("rejeita alteração do tipo", () => {
+    const result = updateTicketSchema.safeParse({
+      type: "REQ",
     });
 
     expect(result.success).toBe(false);
