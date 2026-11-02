@@ -6,6 +6,7 @@ vi.mock("../../../server/db/prisma", () => ({
     ticket: {
       create: vi.fn(),
       findMany: vi.fn(),
+      update: vi.fn(),
     },
   },
 }));
@@ -61,6 +62,7 @@ function createGetRequest(query = ""): Request {
 describe("GET /api/tickets", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+
     vi.mocked(getAuthenticatedEmployee).mockResolvedValue(
       authenticatedEmployee,
     );
@@ -77,6 +79,7 @@ describe("GET /api/tickets", () => {
     expect(response.status).toBe(200);
     expect(body.count).toBe(1);
     expect(body.data[0].id).toBe("ticket-test-001");
+
     expect(prisma.ticket.findMany).toHaveBeenCalledWith({
       where: {
         requestedByEmployeeId: authenticatedEmployee.id,
@@ -108,6 +111,7 @@ describe("GET /api/tickets", () => {
     );
 
     expect(response.status).toBe(200);
+
     expect(prisma.ticket.findMany).toHaveBeenCalledWith({
       where: {
         requestedByEmployeeId: authenticatedEmployee.id,
@@ -127,6 +131,7 @@ describe("GET /api/tickets", () => {
     const response = await GET(createGetRequest("?status=OPEN"));
 
     expect(response.status).toBe(200);
+
     expect(prisma.ticket.findMany).toHaveBeenCalledWith({
       where: {
         requestedByEmployeeId: authenticatedEmployee.id,
@@ -150,6 +155,7 @@ describe("GET /api/tickets", () => {
 
     expect(response.status).toBe(200);
     expect(body.data[0].status).toBe("WAITING_FOR_EMPLOYEE");
+
     expect(prisma.ticket.findMany).toHaveBeenCalledWith({
       where: {
         requestedByEmployeeId: authenticatedEmployee.id,
@@ -171,6 +177,7 @@ describe("GET /api/tickets", () => {
     );
 
     expect(response.status).toBe(200);
+
     expect(prisma.ticket.findMany).toHaveBeenCalledWith({
       where: {
         requestedByEmployeeId: authenticatedEmployee.id,
@@ -234,9 +241,11 @@ describe("GET /api/tickets", () => {
 describe("POST /api/tickets", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+
     vi.mocked(getAuthenticatedEmployee).mockResolvedValue(
       authenticatedEmployee,
     );
+
     vi.mocked(prisma.ticket.findMany).mockResolvedValue([]);
   });
 
@@ -253,6 +262,7 @@ describe("POST /api/tickets", () => {
     expect(response.status).toBe(201);
     expect(body.message).toBe("Chamado criado com sucesso.");
     expect(body.data.id).toBe("ticket-test-001");
+
     expect(prisma.ticket.create).toHaveBeenCalledWith({
       data: {
         ...validTicket,
@@ -262,7 +272,7 @@ describe("POST /api/tickets", () => {
   });
 
   it("retorna 409 quando encontra um chamado duplicado", async () => {
-    vi.mocked(prisma.ticket.findMany).mockResolvedValue([
+    vi.mocked(prisma.ticket.findMany).mockResolvedValueOnce([
       savedTicket,
     ] as never);
 
@@ -277,6 +287,7 @@ describe("POST /api/tickets", () => {
     );
     expect(body.data.id).toBe(savedTicket.id);
     expect(prisma.ticket.create).not.toHaveBeenCalled();
+    expect(prisma.ticket.update).not.toHaveBeenCalled();
   });
 
   it("consulta duplicidade considerando apenas chamados do solicitante autenticado", async () => {
@@ -295,6 +306,100 @@ describe("POST /api/tickets", () => {
         category: validTicket.category,
         status: {
           in: ["OPEN", "IN_PROGRESS", "WAITING_FOR_EMPLOYEE"],
+        },
+      },
+    });
+  });
+
+  it("reabre um chamado resolvido dentro de sete dias", async () => {
+    const resolvedTicket = {
+      ...savedTicket,
+      status: "RESOLVED",
+      resolvedAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000),
+    };
+
+    const reopenedTicket = {
+      ...resolvedTicket,
+      status: "IN_PROGRESS",
+      resolvedAt: null,
+    };
+
+    vi.mocked(prisma.ticket.findMany)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([resolvedTicket] as never);
+
+    vi.mocked(prisma.ticket.update).mockResolvedValue(
+      reopenedTicket as never,
+    );
+
+    const response = await POST(
+      createPostRequest(JSON.stringify(validTicket)),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.message).toBe("Chamado reaberto com sucesso.");
+    expect(body.data.id).toBe(resolvedTicket.id);
+    expect(body.data.status).toBe("IN_PROGRESS");
+    expect(body.data.resolvedAt).toBeNull();
+
+    expect(prisma.ticket.update).toHaveBeenCalledWith({
+      where: {
+        id: resolvedTicket.id,
+      },
+      data: {
+        status: "IN_PROGRESS",
+        resolvedAt: null,
+      },
+    });
+
+    expect(prisma.ticket.create).not.toHaveBeenCalled();
+  });
+
+  it("cria um novo chamado quando o resolvido ultrapassou sete dias", async () => {
+    const expiredTicket = {
+      ...savedTicket,
+      status: "RESOLVED",
+      resolvedAt: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000),
+    };
+
+    vi.mocked(prisma.ticket.findMany)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([expiredTicket] as never);
+
+    vi.mocked(prisma.ticket.create).mockResolvedValue(
+      savedTicket as never,
+    );
+
+    const response = await POST(
+      createPostRequest(JSON.stringify(validTicket)),
+    );
+
+    expect(response.status).toBe(201);
+    expect(prisma.ticket.create).toHaveBeenCalled();
+    expect(prisma.ticket.update).not.toHaveBeenCalled();
+  });
+
+  it("busca chamados resolvidos somente do solicitante autenticado", async () => {
+    vi.mocked(prisma.ticket.findMany)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+
+    vi.mocked(prisma.ticket.create).mockResolvedValue(
+      savedTicket as never,
+    );
+
+    await POST(createPostRequest(JSON.stringify(validTicket)));
+
+    expect(prisma.ticket.findMany).toHaveBeenNthCalledWith(2, {
+      where: {
+        requestedByEmployeeId: authenticatedEmployee.id,
+        affectedEmployeeId: validTicket.affectedEmployeeId,
+        type: validTicket.type,
+        category: validTicket.category,
+        status: "RESOLVED",
+        resolvedAt: {
+          not: null,
         },
       },
     });

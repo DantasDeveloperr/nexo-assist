@@ -5,6 +5,11 @@ import { getAuthenticatedEmployee } from "../../../server/auth/current-employee"
 import { prisma } from "../../../server/db/prisma";
 import { createTicketSchema } from "../../../server/schemas/ticket-schema";
 import { findDuplicateTicket } from "../../../server/services/ticket-duplicate";
+import {
+  canReopenResolvedTicket,
+  findReopenableResolvedTicket,
+} from "../../../server/services/ticket-reopening";
+import { canTransitionTicketStatus } from "../../../server/services/ticket-status-transition";
 import type { TicketStatus } from "../../../types/ticket";
 
 const VALID_STATUSES: TicketStatus[] = [
@@ -124,8 +129,7 @@ export async function POST(request: Request) {
       );
     }
 
-    // 1. Busca chamados ativos do solicitante autenticado
-    // que tenham o mesmo funcionário afetado, tipo e categoria.
+    // 1. Busca chamados ativos do solicitante autenticado.
     const existingTickets = await prisma.ticket.findMany({
       where: {
         requestedByEmployeeId: employee.id,
@@ -138,13 +142,12 @@ export async function POST(request: Request) {
       },
     });
 
-    // 2. Compara os títulos para identificar uma duplicidade.
+    // 2. Impede a criação de chamados duplicados ativos.
     const duplicateTicket = findDuplicateTicket(
       validation.data,
       existingTickets,
     );
 
-    // 3. Se encontrar duplicidade, não cria outro chamado.
     if (duplicateTicket) {
       return NextResponse.json(
         {
@@ -155,7 +158,66 @@ export async function POST(request: Request) {
       );
     }
 
-    // 4. Se não encontrar duplicidade, cria normalmente.
+    // 3. Busca chamados resolvidos do mesmo solicitante e problema.
+    const resolvedTickets = await prisma.ticket.findMany({
+      where: {
+        requestedByEmployeeId: employee.id,
+        affectedEmployeeId: validation.data.affectedEmployeeId,
+        type: validation.data.type,
+        category: validation.data.category,
+        status: "RESOLVED",
+        resolvedAt: {
+          not: null,
+        },
+      },
+    });
+
+    // 4. Verifica se existe um chamado resolvido elegível para reabertura.
+    const ticketToReopen = findReopenableResolvedTicket(
+      validation.data,
+      resolvedTickets,
+    );
+
+    if (ticketToReopen) {
+      // 5. Confirma que a transição de status é permitida.
+      const canTransition = canTransitionTicketStatus(
+        ticketToReopen.status,
+        "IN_PROGRESS",
+      );
+
+      if (
+        !canTransition ||
+        !canReopenResolvedTicket(ticketToReopen.resolvedAt)
+      ) {
+        return NextResponse.json(
+          {
+            error: "Não foi possível reabrir o chamado. Tente novamente.",
+          },
+          { status: 409 },
+        );
+      }
+
+      // 6. Reabre o registro existente, preservando seus dados originais.
+      const reopenedTicket = await prisma.ticket.update({
+        where: {
+          id: ticketToReopen.id,
+        },
+        data: {
+          status: "IN_PROGRESS",
+          resolvedAt: null,
+        },
+      });
+
+      return NextResponse.json(
+        {
+          message: "Chamado reaberto com sucesso.",
+          data: reopenedTicket,
+        },
+        { status: 200 },
+      );
+    }
+
+    // 7. Sem chamado elegível, cria um novo registro.
     const ticket = await prisma.ticket.create({
       data: {
         ...validation.data,

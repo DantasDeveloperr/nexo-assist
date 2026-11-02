@@ -10,7 +10,7 @@ const allowedTransitions: Record<TicketStatus, TicketStatus[]> = {
   OPEN: ["IN_PROGRESS"],
   IN_PROGRESS: ["WAITING_FOR_EMPLOYEE", "RESOLVED"],
   WAITING_FOR_EMPLOYEE: ["IN_PROGRESS"],
-  RESOLVED: ["CLOSED"],
+  RESOLVED: ["IN_PROGRESS", "CLOSED"],
   CLOSED: [],
 };
 

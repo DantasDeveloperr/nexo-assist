@@ -9,6 +9,7 @@ describe("canTransitionTicketStatus", () => {
     ["IN_PROGRESS", "RESOLVED"],
     ["WAITING_FOR_EMPLOYEE", "IN_PROGRESS"],
     ["RESOLVED", "CLOSED"],
+    ["RESOLVED", "IN_PROGRESS"],
   ])("permite a transição de %s para %s", (currentStatus, newStatus) => {
     expect(
       canTransitionTicketStatus(currentStatus, newStatus),
@@ -21,7 +22,6 @@ describe("canTransitionTicketStatus", () => {
     ["WAITING_FOR_EMPLOYEE", "CLOSED"],
     ["CLOSED", "IN_PROGRESS"],
     ["CLOSED", "OPEN"],
-    ["RESOLVED", "IN_PROGRESS"],
   ])("bloqueia a transição de %s para %s", (currentStatus, newStatus) => {
     expect(
       canTransitionTicketStatus(currentStatus, newStatus),
