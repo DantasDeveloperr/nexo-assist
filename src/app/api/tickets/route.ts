@@ -1,10 +1,11 @@
+
 import { NextResponse } from "next/server";
 
 import { getAuthenticatedEmployee } from "../../../server/auth/current-employee";
 import { createTicket } from "../../../server/application/tickets/create-ticket";
+import { listTickets } from "../../../server/application/tickets/list-tickets";
 import { createTicketSchema } from "../../../server/schemas/ticket-schema";
 import type { TicketStatus } from "../../../types/ticket";
-import { listTickets } from "../../../server/application/tickets/list-tickets";
 
 const VALID_STATUSES: TicketStatus[] = [
   "OPEN",
@@ -51,7 +52,7 @@ export async function GET(request: Request) {
       );
     }
 
-     const tickets = await listTickets(employee.id, {
+    const tickets = await listTickets(employee.id, {
       ...(status ? { status: status as TicketStatus } : {}),
       ...(affectedEmployeeId
         ? { affectedEmployeeId: affectedEmployeeId.trim() }
