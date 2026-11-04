@@ -2,7 +2,7 @@
 import { NextResponse } from "next/server";
 
 import { getAuthenticatedEmployee } from "../../../../server/auth/current-employee";
-import { prisma } from "../../../../server/db/prisma";
+import { getTicket } from "../../../../server/application/tickets/get-ticket";
 import { updateTicketSchema } from "../../../../server/schemas/ticket-schema";
 import { updateTicket } from "../../../../server/application/tickets/update-ticket";
 
@@ -33,12 +33,7 @@ export async function GET(
       );
     }
 
-    const ticket = await prisma.ticket.findFirst({
-      where: {
-        id,
-        requestedByEmployeeId: employee.id,
-      },
-    });
+    const ticket = await getTicket(id, employee.id);
 
     if (!ticket) {
       return NextResponse.json(
