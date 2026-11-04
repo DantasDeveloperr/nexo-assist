@@ -13,9 +13,19 @@ model Employee {
   name         String
   email        String   @unique
   passwordHash String
+  role         String   @default("EMPLOYEE")
   createdAt    DateTime @default(now())
 
   requestedTickets Ticket[] @relation("TicketRequester")
+
+  conversations             Conversation[]       @relation("ConversationRequester")
+  assignedConversations     Conversation[]       @relation("ConversationAssignedAnalyst")
+  sentMessages              Message[]            @relation("MessageSender")
+  conversationEvents        ConversationEvent[]  @relation("ConversationEventActor")
+  analystAssignments        AnalystAssignment[]  @relation("AssignmentAnalyst")
+  linkedConversationTickets ConversationTicket[] @relation("ConversationTicketLinker")
+
+  @@index([role])
 }
 
 model Ticket {
@@ -33,8 +43,130 @@ model Ticket {
   updatedAt             DateTime  @updatedAt
   resolvedAt            DateTime?
 
+  conversationLinks ConversationTicket[]
+
   @@index([affectedEmployeeId])
   @@index([requestedByEmployeeId])
   @@index([status])
   @@index([createdAt])
+}
+
+model Conversation {
+  id                 String    @id @default(cuid())
+  employeeId         String
+  assignedAnalystId  String?
+  title              String    @default("Novo atendimento")
+  status             String    @default("ACTIVE")
+  waitingForEmployee Boolean   @default(false)
+  lastMessageAt      DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  closedAt           DateTime?
+  deletedAt          DateTime?
+
+  employee        Employee  @relation("ConversationRequester", fields: [employeeId], references: [id], onDelete: Restrict)
+  assignedAnalyst Employee? @relation("ConversationAssignedAnalyst", fields: [assignedAnalystId], references: [id], onDelete: Restrict)
+
+  messages    Message[]
+  events      ConversationEvent[]
+  decisions   AgentDecision[]
+  assignments AnalystAssignment[]
+  ticketLinks ConversationTicket[]
+
+  @@index([employeeId, status])
+  @@index([assignedAnalystId, status])
+  @@index([lastMessageAt])
+  @@index([deletedAt])
+}
+
+model Message {
+  id                String   @id @default(cuid())
+  conversationId    String
+  senderEmployeeId  String?
+  senderType        String
+  content           String
+  processingStatus  String   @default("NOT_REQUIRED")
+  idempotencyKey    String?  @unique
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Restrict)
+  sender       Employee?    @relation("MessageSender", fields: [senderEmployeeId], references: [id], onDelete: Restrict)
+
+  agentDecisions AgentDecision[]
+
+  @@index([conversationId, createdAt])
+  @@index([senderEmployeeId])
+  @@index([processingStatus])
+}
+
+model AgentDecision {
+  id             String   @id @default(cuid())
+  conversationId String
+  messageId      String?
+  intent         String
+  understanding  String
+  action         String
+  confidence     Float?
+  justification  String
+  outcome        String
+  modelVersion   String?
+  promptVersion  String?
+  createdAt      DateTime @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Restrict)
+  message      Message?     @relation(fields: [messageId], references: [id], onDelete: Restrict)
+
+  @@index([conversationId, createdAt])
+  @@index([messageId])
+}
+
+model ConversationEvent {
+  id             String   @id @default(cuid())
+  conversationId String
+  actorId        String?
+  eventType      String
+  metadata       String?
+  createdAt      DateTime @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Restrict)
+  actor        Employee?    @relation("ConversationEventActor", fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@index([conversationId, createdAt])
+  @@index([actorId])
+  @@index([eventType])
+}
+
+model AnalystAssignment {
+  id             String    @id @default(cuid())
+  conversationId String
+  analystId      String
+  assignedAt     DateTime  @default(now())
+  releasedAt     DateTime?
+  releaseReason  String?
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Restrict)
+  analyst      Employee     @relation("AssignmentAnalyst", fields: [analystId], references: [id], onDelete: Restrict)
+
+  @@index([conversationId, assignedAt])
+  @@index([analystId, releasedAt])
+}
+
+model ConversationTicket {
+  id                 String   @id @default(cuid())
+  conversationId     String
+  ticketId           String
+  linkedByEmployeeId String?
+  origin             String
+  linkedAt           DateTime @default(now())
+  removedAt          DateTime?
+  removalReason      String?
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Restrict)
+  ticket       Ticket       @relation(fields: [ticketId], references: [id], onDelete: Restrict)
+  linkedBy     Employee?    @relation("ConversationTicketLinker", fields: [linkedByEmployeeId], references: [id], onDelete: Restrict)
+
+  @@index([conversationId, linkedAt])
+  @@index([ticketId])
+  @@index([linkedByEmployeeId])
 }
