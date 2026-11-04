@@ -4,18 +4,11 @@ import { NextResponse } from "next/server";
 import { getAuthenticatedEmployee } from "../../../../server/auth/current-employee";
 import { prisma } from "../../../../server/db/prisma";
 import { updateTicketSchema } from "../../../../server/schemas/ticket-schema";
-import { canTransitionTicketStatus } from "../../../../server/services/ticket-status-transition";
-import { canReopenResolvedTicket } from "../../../../server/services/ticket-reopening";
+import { updateTicket } from "../../../../server/application/tickets/update-ticket";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
 }
-
-const editableTicketStatuses = [
-  "OPEN",
-  "IN_PROGRESS",
-  "WAITING_FOR_EMPLOYEE",
-] as const;
 
 export async function GET(
   _request: Request,
@@ -114,39 +107,26 @@ export async function PATCH(
       );
     }
 
-    const existingTicket = await prisma.ticket.findFirst({
-      where: {
-        id,
-        requestedByEmployeeId: employee.id,
-      },
-    });
+    const result = await updateTicket(
+      id,
+      employee.id,
+      validation.data,
+    );
 
-    if (!existingTicket) {
-      return NextResponse.json(
-        { error: "Chamado não encontrado." },
-        { status: 404 },
-      );
-    }
+    switch (result.outcome) {
+      case "NOT_FOUND":
+        return NextResponse.json(
+          { error: "Chamado não encontrado." },
+          { status: 404 },
+        );
 
-    const { status: newStatus, ...otherFields } = validation.data;
+      case "CLOSED":
+        return NextResponse.json(
+          { error: "Chamados encerrados não podem ser alterados." },
+          { status: 409 },
+        );
 
-    const hasTextChanges =
-      otherFields.title !== undefined ||
-      otherFields.description !== undefined;
-
-    // Chamados encerrados não podem receber alterações.
-    if (existingTicket.status === "CLOSED") {
-      return NextResponse.json(
-        { error: "Chamados encerrados não podem ser alterados." },
-        { status: 409 },
-      );
-    }
-
-    // Chamados resolvidos só podem ser reabertos.
-    if (existingTicket.status === "RESOLVED") {
-      const isReopening = newStatus === "IN_PROGRESS";
-
-      if (!isReopening || hasTextChanges) {
+      case "REOPEN_NOT_ALLOWED":
         return NextResponse.json(
           {
             error:
@@ -154,11 +134,8 @@ export async function PATCH(
           },
           { status: 409 },
         );
-      }
 
-      const now = new Date();
-
-      if (!canReopenResolvedTicket(existingTicket.resolvedAt, now)) {
+      case "REOPEN_EXPIRED":
         return NextResponse.json(
           {
             error:
@@ -166,73 +143,25 @@ export async function PATCH(
           },
           { status: 409 },
         );
-      }
 
-      if (
-        !canTransitionTicketStatus(existingTicket.status, newStatus)
-      ) {
+      case "INVALID_TRANSITION":
         return NextResponse.json(
           { error: "Transição de status não permitida." },
           { status: 409 },
         );
-      }
 
-      const updatedTicket = await prisma.ticket.update({
-        where: { id },
-        data: {
-          status: "IN_PROGRESS",
-          resolvedAt: null,
-        },
-      });
+            case "STATUS_NOT_EDITABLE":
+        return NextResponse.json(
+          { error: "O chamado não permite alterações neste estado." },
+          { status: 409 },
+        );
 
-      return NextResponse.json(
-        { data: updatedTicket },
-        { status: 200 },
-      );
+      case "UPDATED":
+        return NextResponse.json(
+          { data: result.ticket },
+          { status: 200 },
+        );
     }
-
-    // Apenas chamados ativos podem ter título e descrição editados.
-    if (
-      !editableTicketStatuses.includes(
-        existingTicket.status as (typeof editableTicketStatuses)[number],
-      )
-    ) {
-      return NextResponse.json(
-        { error: "O chamado não permite alterações neste estado." },
-        { status: 409 },
-      );
-    }
-
-    const now = new Date();
-
-    if (
-      newStatus !== undefined &&
-      newStatus !== existingTicket.status &&
-      !canTransitionTicketStatus(existingTicket.status, newStatus)
-    ) {
-      return NextResponse.json(
-        { error: "Transição de status não permitida." },
-        { status: 409 },
-      );
-    }
-
-    const isResolving =
-      existingTicket.status !== "RESOLVED" &&
-      newStatus === "RESOLVED";
-
-    const updatedTicket = await prisma.ticket.update({
-      where: { id },
-      data: {
-        ...otherFields,
-        ...(newStatus !== undefined ? { status: newStatus } : {}),
-        ...(isResolving ? { resolvedAt: now } : {}),
-      },
-    });
-
-    return NextResponse.json(
-      { data: updatedTicket },
-      { status: 200 },
-    );
   } catch (error) {
     console.error("Erro ao atualizar chamado:", error);
 
