@@ -1,15 +1,9 @@
-
 import { NextResponse } from "next/server";
 
 import { getAuthenticatedEmployee } from "../../../server/auth/current-employee";
+import { createTicket } from "../../../server/application/tickets/create-ticket";
 import { prisma } from "../../../server/db/prisma";
 import { createTicketSchema } from "../../../server/schemas/ticket-schema";
-import { findDuplicateTicket } from "../../../server/services/ticket-duplicate";
-import {
-  canReopenResolvedTicket,
-  findReopenableResolvedTicket,
-} from "../../../server/services/ticket-reopening";
-import { canTransitionTicketStatus } from "../../../server/services/ticket-status-transition";
 import type { TicketStatus } from "../../../types/ticket";
 
 const VALID_STATUSES: TicketStatus[] = [
@@ -19,12 +13,6 @@ const VALID_STATUSES: TicketStatus[] = [
   "RESOLVED",
   "CLOSED",
 ];
-
-const ACTIVE_STATUSES = [
-  "OPEN",
-  "IN_PROGRESS",
-  "WAITING_FOR_EMPLOYEE",
-] as const;
 
 export async function GET(request: Request) {
   try {
@@ -41,7 +29,10 @@ export async function GET(request: Request) {
     const status = searchParams.get("status");
     const affectedEmployeeId = searchParams.get("affectedEmployeeId");
 
-    if (status && !VALID_STATUSES.includes(status as TicketStatus)) {
+    if (
+      status &&
+      !VALID_STATUSES.includes(status as TicketStatus)
+    ) {
       return NextResponse.json(
         { error: "O status informado é inválido." },
         { status: 400 },
@@ -129,106 +120,35 @@ export async function POST(request: Request) {
       );
     }
 
-    // 1. Busca chamados ativos do solicitante autenticado.
-    const existingTickets = await prisma.ticket.findMany({
-      where: {
-        requestedByEmployeeId: employee.id,
-        affectedEmployeeId: validation.data.affectedEmployeeId,
-        type: validation.data.type,
-        category: validation.data.category,
-        status: {
-          in: [...ACTIVE_STATUSES],
-        },
-      },
-    });
-
-    // 2. Impede a criação de chamados duplicados ativos.
-    const duplicateTicket = findDuplicateTicket(
+    const result = await createTicket(
       validation.data,
-      existingTickets,
+      employee.id,
     );
 
-    if (duplicateTicket) {
+    if (result.outcome === "DUPLICATE") {
       return NextResponse.json(
         {
           message: "Já existe um chamado ativo para este problema.",
-          data: duplicateTicket,
+          data: result.ticket,
         },
         { status: 409 },
       );
     }
 
-    // 3. Busca chamados resolvidos do mesmo solicitante e problema.
-    const resolvedTickets = await prisma.ticket.findMany({
-      where: {
-        requestedByEmployeeId: employee.id,
-        affectedEmployeeId: validation.data.affectedEmployeeId,
-        type: validation.data.type,
-        category: validation.data.category,
-        status: "RESOLVED",
-        resolvedAt: {
-          not: null,
-        },
-      },
-    });
-
-    // 4. Verifica se existe um chamado resolvido elegível para reabertura.
-    const ticketToReopen = findReopenableResolvedTicket(
-      validation.data,
-      resolvedTickets,
-    );
-
-    if (ticketToReopen) {
-      // 5. Confirma que a transição de status é permitida.
-      const canTransition = canTransitionTicketStatus(
-        ticketToReopen.status,
-        "IN_PROGRESS",
-      );
-
-      if (
-        !canTransition ||
-        !canReopenResolvedTicket(ticketToReopen.resolvedAt)
-      ) {
-        return NextResponse.json(
-          {
-            error: "Não foi possível reabrir o chamado. Tente novamente.",
-          },
-          { status: 409 },
-        );
-      }
-
-      // 6. Reabre o registro existente, preservando seus dados originais.
-      const reopenedTicket = await prisma.ticket.update({
-        where: {
-          id: ticketToReopen.id,
-        },
-        data: {
-          status: "IN_PROGRESS",
-          resolvedAt: null,
-        },
-      });
-
+    if (result.outcome === "REOPENED") {
       return NextResponse.json(
         {
           message: "Chamado reaberto com sucesso.",
-          data: reopenedTicket,
+          data: result.ticket,
         },
         { status: 200 },
       );
     }
 
-    // 7. Sem chamado elegível, cria um novo registro.
-    const ticket = await prisma.ticket.create({
-      data: {
-        ...validation.data,
-        requestedByEmployeeId: employee.id,
-      },
-    });
-
     return NextResponse.json(
       {
         message: "Chamado criado com sucesso.",
-        data: ticket,
+        data: result.ticket,
       },
       { status: 201 },
     );

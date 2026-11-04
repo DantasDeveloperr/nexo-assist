@@ -1,4 +1,3 @@
-
 type NewTicketData = {
   title: string;
   type: string;
@@ -24,10 +23,10 @@ function normalizeTitle(title: string): string {
     .toLocaleLowerCase("pt-BR");
 }
 
-export function findDuplicateTicket(
+export function findDuplicateTicket<T extends ExistingTicket>(
   newTicket: NewTicketData,
-  existingTickets: ExistingTicket[],
-): ExistingTicket | null {
+  existingTickets: T[],
+): T | null {
   const normalizedNewTitle = normalizeTitle(newTicket.title);
 
   return (
