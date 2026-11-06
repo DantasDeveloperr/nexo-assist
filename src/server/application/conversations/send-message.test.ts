@@ -174,16 +174,32 @@ describe("sendMessage", () => {
     expect(mocks.create).not.toHaveBeenCalled();
   });
 
-  it("permite o envio da 31ª mensagem", async () => {
-    mocks.count.mockResolvedValue(30);
+  it("permite o envio quando existem 29 mensagens, reservando a 31ª posição", async () => {
+    mocks.count.mockResolvedValue(29);
 
     const result = await sendMessage(employeeId, {
       conversationId,
-      content: "Última mensagem permitida",
+      content: "Mensagem permitida",
     });
 
     expect(result.outcome).toBe("SENT");
     expect(mocks.create).toHaveBeenCalledOnce();
+  });
+
+  it("bloqueia o envio quando já existem 30 mensagens", async () => {
+    mocks.count.mockResolvedValue(30);
+
+    const result = await sendMessage(employeeId, {
+      conversationId,
+      content: "Mensagem sem espaço reservado para resposta",
+    });
+
+    expect(result).toEqual({
+      outcome: "MESSAGE_LIMIT_REACHED",
+    });
+
+    expect(mocks.create).not.toHaveBeenCalled();
+    expect(mocks.update).not.toHaveBeenCalled();
   });
 
   it("bloqueia o envio quando já existem 31 mensagens", async () => {
@@ -206,19 +222,22 @@ describe("sendMessage", () => {
     "ACTIVE",
     "WAITING_FOR_ANALYST",
     "IN_PROGRESS",
-  ])("permite mensagens do funcionário quando a conversa está em %s", async (status) => {
-    mocks.findFirst.mockResolvedValue({
-      ...conversation,
-      status,
-    });
+  ])(
+    "permite mensagens do funcionário quando a conversa está em %s",
+    async (status) => {
+      mocks.findFirst.mockResolvedValue({
+        ...conversation,
+        status,
+      });
 
-    const result = await sendMessage(employeeId, {
-      conversationId,
-      content: "Mensagem de teste",
-    });
+      const result = await sendMessage(employeeId, {
+        conversationId,
+        content: "Mensagem de teste",
+      });
 
-    expect(result.outcome).toBe("SENT");
-  });
+      expect(result.outcome).toBe("SENT");
+    },
+  );
 
   it("propaga falhas ocorridas durante a transação", async () => {
     mocks.transaction.mockRejectedValue(

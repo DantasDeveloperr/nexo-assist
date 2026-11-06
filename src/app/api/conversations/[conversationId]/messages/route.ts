@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 
 import { getAuthenticatedEmployee } from "../../../../../server/auth/current-employee";
 import { sendMessage } from "../../../../../server/application/conversations/send-message";
+import { processAgentMessage } from "../../../../../server/application/agent/process-agent-message";
 import { sendMessageSchema } from "../../../../../server/schemas/message-schema";
 
 interface RouteContext {
@@ -57,15 +58,52 @@ export async function POST(
 
     if (result.outcome === "CLOSED") {
       return NextResponse.json(
-        { error: "Não é possível enviar mensagens para uma conversa encerrada." },
+        {
+          error:
+            "Não é possível enviar mensagens para uma conversa encerrada.",
+        },
         { status: 409 },
       );
     }
 
     if (result.outcome === "MESSAGE_LIMIT_REACHED") {
       return NextResponse.json(
-        { error: "O limite de 31 mensagens desta conversa foi atingido." },
+        {
+          error:
+            "O limite de 31 mensagens desta conversa foi atingido.",
+        },
         { status: 409 },
+      );
+    }
+
+    let agentProcessing:
+      | {
+          status: "PROCESSED" | "SKIPPED" | "FAILED" | "NOT_FOUND";
+          action?: string;
+          reason?: string;
+        }
+      = {
+        status: "FAILED",
+      };
+
+    try {
+      const processingResult = await processAgentMessage({
+        conversationId,
+        messageId: result.message.id,
+      });
+
+      agentProcessing = {
+        status: processingResult.status,
+        ...(processingResult.status === "PROCESSED"
+          ? { action: processingResult.action }
+          : processingResult.status === "SKIPPED"
+            ? { reason: processingResult.reason }
+            : {}),
+      };
+    } catch (error) {
+      console.error(
+        "Erro ao processar mensagem com o agente:",
+        error,
       );
     }
 
@@ -73,6 +111,7 @@ export async function POST(
       {
         message: "Mensagem enviada com sucesso.",
         data: result.message,
+        agentProcessing,
       },
       { status: 201 },
     );

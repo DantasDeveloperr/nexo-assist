@@ -2,8 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/server", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("next/server")>();
+  const actual = await importOriginal<typeof import("next/server")>();
 
   return {
     ...actual,
@@ -30,11 +29,16 @@ const authenticatedEmployee = {
 };
 
 const validInterpretation = {
-  title: "Notebook com tela azul",
-  type: "INC" as const,
-  category: "HARDWARE" as const,
-  needsClarification: false,
-  clarifyingQuestion: "",
+  intent: "CREATE_TICKET" as const,
+  understanding: "O funcionário relata uma falha no notebook.",
+  confidence: 0.95,
+  justification: "O relato indica um problema de hardware.",
+  clarificationQuestion: null,
+  ticketDraft: {
+    title: "Notebook com tela azul",
+    type: "INC" as const,
+    category: "HARDWARE" as const,
+  },
 };
 
 function createRequest(body: string): Request {
@@ -121,7 +125,9 @@ describe("POST /api/tickets/interpret", () => {
     );
 
     const response = await POST(
-      createRequest(JSON.stringify({ message: "Preciso de acesso ao sistema." })),
+      createRequest(
+        JSON.stringify({ message: "Preciso de acesso ao sistema." }),
+      ),
     );
 
     const body = await response.json();
@@ -138,7 +144,9 @@ describe("POST /api/tickets/interpret", () => {
     );
 
     const response = await POST(
-      createRequest(JSON.stringify({ message: "Meu computador não liga." })),
+      createRequest(
+        JSON.stringify({ message: "Meu computador não liga." }),
+      ),
     );
 
     const body = await response.json();

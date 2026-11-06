@@ -3,6 +3,9 @@ import { prisma } from "../../db/prisma";
 import type { SendMessageInput } from "../../../types/message";
 
 const MAX_MESSAGES_PER_CONVERSATION = 31;
+const RESERVED_RESPONSE_MESSAGES = 1;
+const MAX_MESSAGES_BEFORE_EMPLOYEE_SEND =
+  MAX_MESSAGES_PER_CONVERSATION - RESERVED_RESPONSE_MESSAGES;
 
 type SendMessageResult =
   | {
@@ -63,7 +66,7 @@ export async function sendMessage(
         },
       });
 
-      if (messageCount >= MAX_MESSAGES_PER_CONVERSATION) {
+      if (messageCount >= MAX_MESSAGES_BEFORE_EMPLOYEE_SEND) {
         return { outcome: "MESSAGE_LIMIT_REACHED" };
       }
 
